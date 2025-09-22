@@ -625,10 +625,15 @@ STACK_OF(X509) *X509_STORE_get1_all_certs(X509_STORE *store)
     }
     if ((sk = sk_X509_new_null()) == NULL)
         return NULL;
-    if (!X509_STORE_lock(store))
+    if (!ossl_x509_store_read_lock(store))
         goto out_free;
+    if (!sk_X509_OBJECT_is_sorted(store->objs)) {
+        X509_STORE_unlock(store);
+        if (!X509_STORE_lock(store))
+            goto err;
+        sk_X509_OBJECT_sort(store->objs);
+    }
 
-    sk_X509_OBJECT_sort(store->objs);
     objs = X509_STORE_get0_objects(store);
     for (i = 0; i < sk_X509_OBJECT_num(objs); i++) {
         X509 *cert = X509_OBJECT_get0_X509(sk_X509_OBJECT_value(objs, i));
@@ -663,10 +668,15 @@ STACK_OF(X509) *X509_STORE_CTX_get1_certs(X509_STORE_CTX *ctx,
     if (store == NULL)
         return sk_X509_new_null();
 
-    if (!X509_STORE_lock(store))
+    if (!ossl_x509_store_read_lock(store))
         return NULL;
+    if (!sk_X509_OBJECT_is_sorted(store->objs)) {
+        X509_STORE_unlock(store);
+        if (!X509_STORE_lock(store))
+            return NULL;
+        sk_X509_OBJECT_sort(store->objs);
+    }
 
-    sk_X509_OBJECT_sort(store->objs);
     idx = x509_object_idx_cnt(store->objs, X509_LU_X509, nm, &cnt);
     if (idx < 0) {
         /*
@@ -679,7 +689,8 @@ STACK_OF(X509) *X509_STORE_CTX_get1_certs(X509_STORE_CTX *ctx,
             return i < 0 ? NULL : sk_X509_new_null();
         if (!X509_STORE_lock(store))
             return NULL;
-        sk_X509_OBJECT_sort(store->objs);
+        if (!sk_X509_OBJECT_is_sorted(store->objs))
+            sk_X509_OBJECT_sort(store->objs);
         idx = x509_object_idx_cnt(store->objs, X509_LU_X509, nm, &cnt);
     }
 
@@ -717,11 +728,19 @@ STACK_OF(X509_CRL) *X509_STORE_CTX_get1_crls(const X509_STORE_CTX *ctx,
     sk = sk_X509_CRL_new_null();
     if (i == 0)
         return sk;
-    if (!X509_STORE_lock(store)) {
+    if (!ossl_x509_store_read_lock(store)) {
         sk_X509_CRL_free(sk);
         return NULL;
     }
-    sk_X509_OBJECT_sort(store->objs);
+    if (!sk_X509_OBJECT_is_sorted(store->objs)) {
+        X509_STORE_unlock(store);
+        if (!X509_STORE_lock(store)) {
+            sk_X509_CRL_free(sk);
+            return NULL;
+        }
+        sk_X509_OBJECT_sort(store->objs);
+    }
+
     idx = x509_object_idx_cnt(store->objs, X509_LU_CRL, nm, &cnt);
     if (idx < 0) {
         X509_STORE_unlock(store);
