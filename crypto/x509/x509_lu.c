@@ -333,18 +333,6 @@ int ossl_x509_store_ctx_get_by_subject(const X509_STORE_CTX *ctx, X509_LOOKUP_TY
 
     if (!ossl_x509_store_read_lock(store))
         return 0;
-    /* Should already be sorted...but just in case */
-    if (!sk_X509_OBJECT_is_sorted(store->objs)) {
-        X509_STORE_unlock(store);
-        /* Take a write lock instead of a read lock */
-        if (!X509_STORE_lock(store))
-            return 0;
-        /*
-         * Another thread might have sorted it in the meantime. But if so,
-         * sk_X509_OBJECT_sort() exits early.
-         */
-        sk_X509_OBJECT_sort(store->objs);
-    }
     tmp = X509_OBJECT_retrieve_by_subject(store->objs, type, name);
     X509_STORE_unlock(store);
 
@@ -419,6 +407,9 @@ static int x509_store_add(X509_STORE *store, void *x, int crl)
         added = sk_X509_OBJECT_push(store->objs, obj);
         ret = added != 0;
     }
+    if (added != 0)
+        sk_X509_OBJECT_sort(store->objs);
+
     X509_STORE_unlock(store);
 
     if (added == 0)             /* obj not pushed */
@@ -625,10 +616,9 @@ STACK_OF(X509) *X509_STORE_get1_all_certs(X509_STORE *store)
     }
     if ((sk = sk_X509_new_null()) == NULL)
         return NULL;
-    if (!X509_STORE_lock(store))
+    if (!ossl_x509_store_read_lock(store))
         goto out_free;
 
-    sk_X509_OBJECT_sort(store->objs);
     objs = X509_STORE_get0_objects(store);
     for (i = 0; i < sk_X509_OBJECT_num(objs); i++) {
         X509 *cert = X509_OBJECT_get0_X509(sk_X509_OBJECT_value(objs, i));
@@ -663,10 +653,9 @@ STACK_OF(X509) *X509_STORE_CTX_get1_certs(X509_STORE_CTX *ctx,
     if (store == NULL)
         return sk_X509_new_null();
 
-    if (!X509_STORE_lock(store))
+    if (!ossl_x509_store_read_lock(store))
         return NULL;
 
-    sk_X509_OBJECT_sort(store->objs);
     idx = x509_object_idx_cnt(store->objs, X509_LU_X509, nm, &cnt);
     if (idx < 0) {
         /*
@@ -677,9 +666,8 @@ STACK_OF(X509) *X509_STORE_CTX_get1_certs(X509_STORE_CTX *ctx,
         i = ossl_x509_store_ctx_get_by_subject(ctx, X509_LU_X509, nm, NULL);
         if (i <= 0)
             return i < 0 ? NULL : sk_X509_new_null();
-        if (!X509_STORE_lock(store))
+        if (!ossl_x509_store_read_lock(store))
             return NULL;
-        sk_X509_OBJECT_sort(store->objs);
         idx = x509_object_idx_cnt(store->objs, X509_LU_X509, nm, &cnt);
     }
 
@@ -717,11 +705,10 @@ STACK_OF(X509_CRL) *X509_STORE_CTX_get1_crls(const X509_STORE_CTX *ctx,
     sk = sk_X509_CRL_new_null();
     if (i == 0)
         return sk;
-    if (!X509_STORE_lock(store)) {
+    if (!ossl_x509_store_read_lock(store)) {
         sk_X509_CRL_free(sk);
         return NULL;
     }
-    sk_X509_OBJECT_sort(store->objs);
     idx = x509_object_idx_cnt(store->objs, X509_LU_CRL, nm, &cnt);
     if (idx < 0) {
         X509_STORE_unlock(store);
