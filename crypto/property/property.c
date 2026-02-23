@@ -1275,7 +1275,8 @@ int ossl_method_store_freeze_cache(OSSL_METHOD_STORE *store, const char *propq)
         || evp_keymgmt_fetch_all(store->ctx) <= 0
         || evp_kdf_fetch_all(store->ctx) <= 0
         || evp_kem_fetch_all(store->ctx) <= 0
-        || evp_asym_cipher_fetch_all(store->ctx) <= 0)
+        || evp_asym_cipher_fetch_all(store->ctx) <= 0
+        || evp_signature_fetch_all(store->ctx) <= 0)
         goto err;
 
     for (int i = 0; i < NUM_SHARDS; ++i) {
