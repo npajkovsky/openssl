@@ -13,6 +13,17 @@
 #include <openssl/e_os2.h>
 #include <stddef.h>
 /**
+ * Initial state for fnv1a 64 bit hash function
+ */
+ossl_unused uint64_t ossl_fnv1a_hash_init(void);
+
+/**
+ * Streaming update for generalized fnv1a 64 bit hash function
+ */
+ossl_unused uint64_t ossl_fnv1a_hash_update(uint64_t hash, const uint8_t *key,
+    size_t len);
+
+/**
  * Generalized fnv1a 64 bit hash function
  */
 ossl_unused uint64_t ossl_fnv1a_hash(uint8_t *key, size_t len);

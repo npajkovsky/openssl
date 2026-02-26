@@ -26,6 +26,8 @@
 #include "crypto/evp.h"
 #include "crypto/evp/evp_local.h"
 #include "internal/namemap.h"
+#include "internal/hashfunc.h"
+#include "crypto/ctype.h"
 
 /*
  * The number of elements in the query cache before we initiate a flush.
@@ -111,11 +113,86 @@ DEFINE_SPARSE_ARRAY_OF(ALGORITHM);
 
 DEFINE_STACK_OF(ALGORITHM)
 
+typedef struct {
+    const char *name;
+    size_t name_len;
+    const char *propq;
+    size_t propq_len;
+} FROZEN_CACHE_KEY_FIELDS;
+
 HT_START_KEY_DEFN(frozen_cache_key)
-HT_DEF_KEY_FIELD_CHAR_ARRAY(name, 64)
-/* TODO(FREEZE): allow variable length propq */
-HT_DEF_KEY_FIELD_CHAR_ARRAY(propq, 64)
+HT_DEF_KEY_FIELD(name, const char *)
+HT_DEF_KEY_FIELD(name_len, size_t)
+HT_DEF_KEY_FIELD(propq, const char *)
+HT_DEF_KEY_FIELD(propq_len, size_t)
 HT_END_KEY_DEFN(FROZEN_CACHE_KEY)
+
+static ossl_inline const FROZEN_CACHE_KEY_FIELDS *frozen_cache_key_fields(HT_KEY *key)
+{
+    return (const FROZEN_CACHE_KEY_FIELDS *)key->keybuf;
+}
+
+static uint64_t frozen_cache_hash(HT_KEY *key)
+{
+    const FROZEN_CACHE_KEY_FIELDS *fields = frozen_cache_key_fields(key);
+    uint64_t hash = ossl_fnv1a_hash_init();
+
+    hash = ossl_fnv1a_hash_update(hash, (const uint8_t *)fields->name,
+        fields->name_len);
+    if (*fields->propq != '\0')
+        hash = ossl_fnv1a_hash_update(hash, (const uint8_t *)fields->propq,
+            fields->propq_len);
+
+    return hash;
+}
+
+static int frozen_cache_cmp(HT_KEY *a, HT_KEY *b)
+{
+    const FROZEN_CACHE_KEY_FIELDS *fa = frozen_cache_key_fields(a);
+    const FROZEN_CACHE_KEY_FIELDS *fb = frozen_cache_key_fields(b);
+
+    if (fa->name_len != fb->name_len || fa->propq_len != fb->propq_len)
+        return 0;
+    if ((fa->name_len > 0 && (fa->name == NULL || fb->name == NULL))
+        || (fa->propq_len > 0 && (fa->propq == NULL || fb->propq == NULL)))
+        return 0;
+    if (fa->name_len > 0
+        && memcmp(fa->name, fb->name, fa->name_len) != 0)
+        return 0;
+    if (fa->propq_len > 0
+        && memcmp(fa->propq, fb->propq, fa->propq_len) != 0)
+        return 0;
+
+    return 1;
+}
+
+static void frozen_cache_key_init(FROZEN_CACHE_KEY *key, const char *alg_name,
+    const char *propq)
+{
+    HT_INIT_KEY(key);
+    HT_SET_KEY_FIELD(key, name, alg_name);
+    HT_SET_KEY_FIELD(key, name_len, strlen(alg_name));
+    HT_SET_KEY_FIELD(key, propq, propq);
+    HT_SET_KEY_FIELD(key, propq_len, strlen(propq));
+}
+
+static char *frozen_cache_name_lc(const char *alg_name)
+{
+    size_t i, len;
+    char *ret;
+
+    if (alg_name == NULL)
+        return NULL;
+    len = strlen(alg_name);
+    ret = OPENSSL_malloc(len + 1);
+    if (ret == NULL)
+        return NULL;
+
+    for (i = 0; i < len; i++)
+        ret[i] = (char)ossl_tolower((unsigned char)alg_name[i]);
+    ret[len] = '\0';
+    return ret;
+}
 
 typedef struct ossl_global_properties_st {
     OSSL_PROPERTY_LIST *list;
@@ -1025,6 +1102,7 @@ int ossl_frozen_method_store_cache_get(OSSL_METHOD_STORE *store,
 {
     FROZEN_CACHE_KEY key;
     HT_VALUE *val;
+    char *alg_name_lc;
 
     if (store == NULL
         || alg_name == NULL
@@ -1032,11 +1110,18 @@ int ossl_frozen_method_store_cache_get(OSSL_METHOD_STORE *store,
         || store->frozen_algs == NULL)
         return 0;
 
+    alg_name_lc = frozen_cache_name_lc(alg_name);
+    if (alg_name_lc == NULL)
+        return 0;
+
     HT_INIT_KEY(&key);
-    HT_SET_KEY_STRING_CASE(&key, name, alg_name);
-    HT_SET_KEY_STRING(&key, propq, prop_query);
+    HT_SET_KEY_FIELD(&key, name, alg_name_lc);
+    HT_SET_KEY_FIELD(&key, name_len, strlen(alg_name_lc));
+    HT_SET_KEY_FIELD(&key, propq, prop_query);
+    HT_SET_KEY_FIELD(&key, propq_len, strlen(prop_query));
 
     val = ossl_ht_get(store->frozen_algs, TO_HT_KEY(&key));
+    OPENSSL_free(alg_name_lc);
     if (val == NULL)
         return 1;
     *method = ((METHOD *)val->value)->method;
@@ -1054,10 +1139,10 @@ struct alg_freeze_st {
 static void frozen_cache_free(HT_VALUE *val)
 {
     METHOD *method = (METHOD *)val->value;
+
     if (method == NULL || method->free_dup == NULL)
         return;
     ossl_method_free_frozen(method);
-
     OPENSSL_free(method);
 }
 
@@ -1068,25 +1153,34 @@ static int freeze_alg(OSSL_METHOD_STORE *store, ALGORITHM *alg,
     IMPLEMENTATION *best_impl = NULL;
     FROZEN_CACHE_KEY key;
     HT_VALUE val = { 0 };
+    char *alg_name_lc = NULL;
     const OSSL_PROVIDER *prov = NULL;
 
-    HT_INIT_KEY(&key);
-    HT_SET_KEY_STRING_CASE(&key, name, alg_name);
-    HT_SET_KEY_STRING(&key, propq, propq);
+    alg_name_lc = frozen_cache_name_lc(alg_name);
+    if (alg_name_lc == NULL)
+        return 0;
 
-    if (ossl_ht_get(store->frozen_algs, TO_HT_KEY(&key)) != NULL)
+    frozen_cache_key_init(&key, alg_name_lc, propq);
+
+    if (ossl_ht_get(store->frozen_algs, TO_HT_KEY(&key)) != NULL) {
+        OPENSSL_free(alg_name_lc);
         return 1;
+    }
 
     ret = ossl_method_store_fetch_best_impl(store,
         alg->nid, propq, &prov, &best_impl);
     if (ret == 0 || best_impl == NULL
         || best_impl->method.dup == NULL
-        || best_impl->method.free_dup == NULL)
+        || best_impl->method.free_dup == NULL) {
+        OPENSSL_free(alg_name_lc);
         return 1;
+    }
 
     val.value = ossl_method_dup(&best_impl->method);
-    if (val.value == NULL)
+    if (val.value == NULL) {
+        OPENSSL_free(alg_name_lc);
         return ret;
+    }
 
     ret = ossl_ht_insert(store->frozen_algs, TO_HT_KEY(&key), &val, NULL);
     if (ret <= 0) {
@@ -1144,9 +1238,11 @@ int ossl_method_store_freeze_cache(OSSL_METHOD_STORE *store, const char *propq)
 {
     HT_CONFIG ht_conf = {
         .ht_free_fn = frozen_cache_free,
+        .ht_hash_fn = frozen_cache_hash,
         .init_neighborhoods = store->cache_nelem,
         .collision_check = 1,
         .no_rcu = 1,
+        .ht_cmp_fn = frozen_cache_cmp,
     };
     struct alg_freeze_st af = {
         .store = store,

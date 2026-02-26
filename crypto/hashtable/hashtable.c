@@ -188,6 +188,8 @@ HT *ossl_ht_new(const HT_CONFIG *conf)
 
     if (conf->lockless_reads && conf->no_rcu)
         goto err;
+    if (conf->ht_cmp_fn != NULL && !conf->collision_check)
+        goto err;
 
     if (!conf->no_rcu) {
         new->atomic_lock = CRYPTO_THREAD_lock_new();
@@ -554,8 +556,14 @@ static void free_old_ht_value(void *arg)
     OPENSSL_free(h);
 }
 
-static ossl_inline int match_key(HT_KEY *a, HT_KEY *b)
+static ossl_inline int match_key(HT *h, HT_KEY *a, HT_KEY *b)
 {
+    if (a->keybuf == NULL || b->keybuf == NULL)
+        return 1;
+
+    if (h->config.ht_cmp_fn != NULL)
+        return h->config.ht_cmp_fn(a, b);
+
     /*
      * keys match if they are both present, the same size
      * and compare equal in memory
@@ -565,7 +573,7 @@ static ossl_inline int match_key(HT_KEY *a, HT_KEY *b)
     if (a->keybuf != NULL && b->keybuf != NULL && a->keysize == b->keysize)
         return !memcmp(a->keybuf, b->keybuf, a->keysize);
 
-    return 1;
+    return 0;
 }
 
 static int ossl_ht_insert_locked(HT *h, uint64_t hash,
@@ -603,7 +611,7 @@ static int ossl_ht_insert_locked(HT *h, uint64_t hash,
             } else {
                 ihash = md->neighborhoods[neigh_idx].entries[j].hash;
             }
-            if (compare_hash(hash, ihash) && match_key(&newval->value.key, &ival->key)) {
+            if (compare_hash(hash, ihash) && match_key(h, &newval->value.key, &ival->key)) {
                 if (olddata == NULL) {
                     /* This would insert a duplicate -> fail */
                     return 0;
@@ -758,7 +766,7 @@ HT_VALUE *ossl_ht_get(HT *h, HT_KEY *key)
             } else {
                 ehash = md->neighborhoods[neigh_idx].entries[j].hash;
             }
-            if (compare_hash(hash, ehash) && match_key(&ival->value.key, key))
+            if (compare_hash(hash, ehash) && match_key(h, &ival->value.key, key))
                 return (HT_VALUE *)ival;
         }
         if (!lockless_reads)
@@ -799,7 +807,7 @@ int ossl_ht_delete(HT *h, HT_KEY *key)
         if (v == NULL)
             continue;
         if (compare_hash(hash, h->md->neighborhoods[neigh_idx].entries[j].hash)
-            && match_key(key, &v->value.key)) {
+            && match_key(h, key, &v->value.key)) {
             if (!h->config.no_rcu) {
                 if (!CRYPTO_atomic_store(&h->md->neighborhoods[neigh_idx].entries[j].hash,
                         0, h->atomic_lock))

@@ -66,6 +66,7 @@ contains configurations options for hashtable.  Current config options consist
 of:
     I<ht_free_fn> The function to call to free a value, may be NULL.
     I<ht_hash_fn> The function to generate a hash value for a key, may be NULL.
+    I<ht_cmp_fn> The function to compare two keys for equality, may be NULL.
     I<init_neighborhoods> The initial number of neighborhoods in the hash table.
     I<no_rcu> Disables RCU locking.
 

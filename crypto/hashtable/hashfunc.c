@@ -10,9 +10,14 @@
 
 #include "internal/hashfunc.h"
 
-ossl_unused uint64_t ossl_fnv1a_hash(uint8_t *key, size_t len)
+ossl_unused uint64_t ossl_fnv1a_hash_init(void)
 {
-    uint64_t hash = 0xcbf29ce484222325ULL;
+    return 0xcbf29ce484222325ULL;
+}
+
+ossl_unused uint64_t ossl_fnv1a_hash_update(uint64_t hash, const uint8_t *key,
+    size_t len)
+{
     size_t i;
 
     for (i = 0; i < len; i++) {
@@ -20,4 +25,9 @@ ossl_unused uint64_t ossl_fnv1a_hash(uint8_t *key, size_t len)
         hash *= 0x00000100000001B3ULL;
     }
     return hash;
+}
+
+ossl_unused uint64_t ossl_fnv1a_hash(uint8_t *key, size_t len)
+{
+    return ossl_fnv1a_hash_update(ossl_fnv1a_hash_init(), key, len);
 }

@@ -55,6 +55,7 @@ typedef struct ht_config_st {
     uint32_t collision_check;
     uint32_t lockless_reads;
     uint32_t no_rcu;
+    int (*ht_cmp_fn)(HT_KEY *a, HT_KEY *b);
 } HT_CONFIG;
 
 /*
