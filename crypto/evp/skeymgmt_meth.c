@@ -55,6 +55,7 @@ static void *skeymgmt_new(void)
         EVP_SKEYMGMT_free(skeymgmt);
         return NULL;
     }
+    skeymgmt->origin = EVP_ORIG_DYNAMIC;
     return skeymgmt;
 }
 
@@ -152,7 +153,10 @@ int EVP_SKEYMGMT_up_ref(EVP_SKEYMGMT *skeymgmt)
 {
     int ref = 0;
 
-    CRYPTO_UP_REF(&skeymgmt->refcnt, &ref);
+    if (skeymgmt->origin == EVP_ORIG_THREAD_LOCAL)
+        skeymgmt->refcnt.val++;
+    else
+        CRYPTO_UP_REF(&skeymgmt->refcnt, &ref);
     return 1;
 }
 
@@ -163,7 +167,12 @@ void EVP_SKEYMGMT_free(EVP_SKEYMGMT *skeymgmt)
     if (skeymgmt == NULL)
         return;
 
-    CRYPTO_DOWN_REF(&skeymgmt->refcnt, &ref);
+    if (skeymgmt->origin == EVP_ORIG_THREAD_LOCAL) {
+        skeymgmt->refcnt.val--;
+        ref = skeymgmt->refcnt.val;
+    } else {
+        CRYPTO_DOWN_REF(&skeymgmt->refcnt, &ref);
+    }
     if (ref > 0)
         return;
     OPENSSL_free(skeymgmt->type_name);

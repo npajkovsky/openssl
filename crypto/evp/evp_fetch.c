@@ -1,4 +1,9 @@
-/*
+/*case OSSL_OP_SKEYMGMT:
+ *  EVP_SKEYMGMT *smg = ossl_ht_evpcache_EVP_SKEYMGMT_get(cache->cache, TO_HT_KEY(&key), &v);
+ *  if (smg != NULL)
+ *      smg->refcnt.val++;
+ *  ret = smg;
+ *  break;
  * Copyright 2019-2025 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
@@ -47,6 +52,7 @@ IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_KEYEXCH, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_SIGNATURE, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_ASYM_CIPHER, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_KEM, evpcache, static)
+IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_SKEYMGMT, evpcache, static)
 
 #define NAME_SEPARATOR ':'
 
@@ -442,6 +448,7 @@ static void evp_thread_local_free(HT_VALUE *val)
     TL_FREE(EVP_SIGNATURE, val);
     TL_FREE(EVP_ASYM_CIPHER, val);
     TL_FREE(EVP_KEM, val);
+    TL_FREE(EVP_SKEYMGMT, val);
 }
 
 static void free_evp_thread_cache(void *arg)
@@ -620,6 +627,11 @@ static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
             TL_CLONE_AND_INSERT(EVP_KEM, method, cache->cache, key, &kem);
             ret = kem;
             break;
+        case OSSL_OP_SKEYMGMT:
+            EVP_SKEYMGMT *smg;
+            TL_CLONE_AND_INSERT(EVP_SKEYMGMT, method, cache->cache, key, &smg);
+            ret = smg;
+            break;
         default:
             break;
         }
@@ -761,6 +773,12 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
             if (kem != NULL)
                 kem->refcnt.val++;
             ret = kem;
+            break;
+        case OSSL_OP_SKEYMGMT:
+            EVP_SKEYMGMT *smg = ossl_ht_evpcache_EVP_SKEYMGMT_get(cache->cache, TO_HT_KEY(&key), &v);
+            if (smg != NULL)
+                smg->refcnt.val++;
+            ret = smg;
             break;
         default:
             break;
