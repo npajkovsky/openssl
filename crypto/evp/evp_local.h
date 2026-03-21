@@ -193,6 +193,7 @@ struct evp_keyexch_st {
 
 struct evp_signature_st {
     int name_id;
+    int origin;
     char *type_name;
     const char *description;
     OSSL_PROVIDER *prov;
