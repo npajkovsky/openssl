@@ -17,9 +17,16 @@
 #include "internal/core.h"
 #include "internal/provider.h"
 #include "internal/namemap.h"
+#include "internal/hashtable.h"
+#include "internal/threads_common.h"
 #include "crypto/decoder.h"
 #include "crypto/evp.h" /* evp_local.h needs it */
+#include "crypto/cryptlib.h"
 #include "evp_local.h"
+
+typedef struct evp_cache_key {
+    HT_KEY key_header;
+} EVP_CACHE_KEY;
 
 #define NAME_SEPARATOR ':'
 
@@ -388,6 +395,73 @@ inner_evp_generic_fetch(struct evp_method_data_st *methdata,
     return method;
 }
 
+static void evp_thread_local_free(HT_VALUE *val)
+{
+    return;
+}
+
+static void free_evp_thread_cache(void *arg)
+{
+    OSSL_LIB_CTX *ctx = arg;
+    HT *cache = CRYPTO_THREAD_get_local_ex(CRYPTO_THREAD_LOCAL_EVP_CACHE_KEY,
+        ctx);
+
+    CRYPTO_THREAD_set_local_ex(CRYPTO_THREAD_LOCAL_EVP_CACHE_KEY, ctx, NULL);
+
+    ossl_ht_free(cache);
+}
+
+static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
+    int operation_id,
+    const char *name,
+    const char *prop)
+{
+    HT *cache = CRYPTO_THREAD_get_local_ex(CRYPTO_THREAD_LOCAL_EVP_CACHE_KEY,
+        ctx);
+    size_t namelen = strlen(name);
+    size_t proplen = prop == NULL ? 0 : strlen(prop);
+    EVP_CACHE_KEY key;
+
+    /*
+     * In the nominal case this will be true at most once
+     */
+    if (ossl_unlikely(cache == NULL)) {
+        HT_CONFIG conf = {
+            .ctx = ctx,
+            .ht_free_fn = evp_thread_local_free,
+            .ht_hash_fn = NULL,
+            .init_neighborhoods = 0,
+            .collision_check = 1,
+            .lockless_reads = 0,
+            .no_rcu = 1
+        };
+
+        cache = ossl_ht_new(&conf);
+        if (cache == NULL)
+            return NULL;
+        if (!CRYPTO_THREAD_set_local_ex(CRYPTO_THREAD_LOCAL_EVP_CACHE_KEY,
+                ctx, cache)) {
+            ossl_ht_free(cache);
+            return NULL;
+        }
+        if (!ossl_init_thread_start(NULL, ctx, free_evp_thread_cache)) {
+            CRYPTO_THREAD_set_local_ex(CRYPTO_THREAD_LOCAL_EVP_CACHE_KEY,
+                ctx, NULL);
+            ossl_ht_free(cache);
+            return NULL;
+        }
+        return NULL;
+    } else {
+        uint8_t keybuf[namelen + proplen];
+
+        memcpy(&keybuf[0], name, namelen);
+        if (proplen != 0)
+            memcpy(&keybuf[namelen], prop, proplen);
+        HT_INIT_KEY_EXTERNAL(&key, keybuf, namelen + proplen);
+    }
+    return NULL;
+}
+
 void *evp_generic_fetch(OSSL_LIB_CTX *libctx, int operation_id,
     const char *name, const char *properties,
     void *(*new_method)(int name_id,
@@ -397,7 +471,11 @@ void *evp_generic_fetch(OSSL_LIB_CTX *libctx, int operation_id,
     void (*free_method)(void *))
 {
     struct evp_method_data_st methdata;
-    void *method;
+    void *method = evp_thread_local_fetch(libctx, operation_id,
+        name, properties);
+
+    if (method != NULL)
+        return method;
 
     methdata.libctx = libctx;
     methdata.tmp_store = NULL;
