@@ -390,3 +390,5 @@ int evp_names_do_all(OSSL_PROVIDER *prov, int number,
     void (*fn)(const char *name, void *data),
     void *data);
 int evp_cipher_cache_constants(EVP_CIPHER *cipher);
+
+void evp_flush_thread_local_caches();

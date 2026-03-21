@@ -19,6 +19,7 @@
 #include "internal/namemap.h"
 #include "internal/hashtable.h"
 #include "internal/threads_common.h"
+#include "internal/tsan_assist.h"
 #include "crypto/decoder.h"
 #include "crypto/evp.h" /* evp_local.h needs it */
 #include "crypto/cryptlib.h"
@@ -32,6 +33,8 @@ typedef struct evp_thread_cache {
     uint64_t flush_generation;
     HT *cache;
 } EVP_THREAD_CACHE;
+
+static TSAN_QUALIFIER uint64_t flush_generation = 0;
 
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_MD, evpcache, static)
 
@@ -402,12 +405,16 @@ inner_evp_generic_fetch(struct evp_method_data_st *methdata,
     return method;
 }
 
+void evp_flush_thread_local_caches()
+{
+    tsan_counter(&flush_generation);
+}
+
 #define TL_FREE(typ, val)                                          \
     do {                                                           \
         typ *evp = ossl_ht_evpcache_##typ##_from_value(val);       \
                                                                    \
         if (evp != NULL && evp->origin == EVP_ORIG_THREAD_LOCAL) { \
-            evp->origin = EVP_ORIG_DYNAMIC;                        \
             typ##_free(evp);                                       \
             return;                                                \
         }                                                          \
@@ -430,29 +437,92 @@ static void free_evp_thread_cache(void *arg)
     OPENSSL_free(cache);
 }
 
-#define TL_CLONE_AND_INSERT(typ, meth, cache, key, newmeth)                                        \
-    do {                                                                                           \
-        typ *evp = (typ *)(meth);                                                                  \
-        typ *tlevp = OPENSSL_memdup(evp, sizeof(*evp));                                            \
-        typ *oldtlevp = NULL;                                                                      \
-                                                                                                   \
-        *newmeth = NULL;                                                                           \
-                                                                                                   \
-        if (tlevp != NULL) {                                                                       \
-            if (!CRYPTO_NEW_REF(&tlevp->refcnt, 1)) {                                              \
-                OPENSSL_free(tlevp);                                                               \
-            } else {                                                                               \
-                if (!ossl_provider_up_ref(tlevp->prov)) {                                          \
-                    CRYPTO_FREE_REF(&tlevp->refcnt);                                               \
-                    OPENSSL_free(tlevp);                                                           \
-                } else {                                                                           \
-                    tlevp->origin = EVP_ORIG_THREAD_LOCAL;                                         \
-                    typ##_free(evp);                                                               \
-                    ossl_ht_evpcache_##typ##_insert((cache), TO_HT_KEY(&(key)), tlevp, &oldtlevp); \
-                    *newmeth = tlevp;                                                              \
-                }                                                                                  \
-            }                                                                                      \
-        }                                                                                          \
+static char *merge_defult_properties_string(const char *prop, OSSL_LIB_CTX *ctx)
+{
+    OSSL_PROPERTY_LIST *pq = NULL, **gpq = NULL, *pfull = NULL;
+    char *full_string = NULL;
+    size_t bufsize;
+
+    gpq = ossl_ctx_global_properties(ctx, 0);
+
+    if (*gpq == NULL && prop == NULL) {
+        /*
+         * Both null, an empty string works here
+         */
+        return OPENSSL_zalloc(1);
+    } else if (*gpq == NULL) {
+        /*
+         * PQ Is not null, so our property string is
+         * just the prop_query
+         */
+        full_string = OPENSSL_strdup(prop);
+        return full_string;
+    } else if (prop == NULL) {
+        /*
+         * gpq not null, just need to turn that into a string
+         */
+        bufsize = ossl_property_list_to_string(ctx, *gpq, NULL, 0);
+        full_string = OPENSSL_zalloc(bufsize);
+        ossl_property_list_to_string(ctx, *gpq, full_string, bufsize);
+        return full_string;
+    } else {
+        /*
+         * both non-null, need to merge
+         */
+        pq = ossl_parse_query(ctx, prop, 0);
+        pfull = ossl_property_merge(pq, *gpq);
+        bufsize = ossl_property_list_to_string(ctx, pfull, NULL, 0);
+        full_string = OPENSSL_zalloc(bufsize);
+        ossl_property_list_to_string(ctx, pfull, full_string, bufsize);
+        ossl_property_free(pfull);
+        ossl_property_free(pq);
+        return full_string;
+    }
+    return NULL;
+}
+
+/*
+ * Generic macro to clone and insert all evp types
+ * Note: We make ourselves a new refcount here, and set its initial value
+ * to 2.  Thats one refcount for the hash table, and one for the caller
+ *
+ * Note also: because the methods we are caching are thread local, we can cheat
+ * a bit here and directly increment/decrement the refcount, as there is only
+ * one thread that will ever access it, which lets us avoid an atomic operation
+ */
+#define TL_CLONE_AND_INSERT(typ, meth, cache, key, newmeth)                         \
+    do {                                                                            \
+        typ *evp = (typ *)(meth);                                                   \
+        typ *tlevp = OPENSSL_memdup(evp, sizeof(*evp));                             \
+        typ *oldtlevp = NULL;                                                       \
+                                                                                    \
+        *newmeth = NULL;                                                            \
+                                                                                    \
+        if (tlevp != NULL) {                                                        \
+            if (!CRYPTO_NEW_REF(&tlevp->refcnt, 2)) {                               \
+                OPENSSL_free(tlevp);                                                \
+            } else {                                                                \
+                tlevp->type_name = OPENSSL_strdup(evp->type_name);                  \
+                if (tlevp->type_name == NULL) {                                     \
+                    OPENSSL_free(tlevp);                                            \
+                } else {                                                            \
+                    if (!ossl_provider_up_ref(tlevp->prov)) {                       \
+                        CRYPTO_FREE_REF(&tlevp->refcnt);                            \
+                        OPENSSL_free(tlevp->type_name);                             \
+                        OPENSSL_free(tlevp);                                        \
+                    } else {                                                        \
+                        tlevp->origin = EVP_ORIG_THREAD_LOCAL;                      \
+                        typ##_free(evp);                                            \
+                        ossl_ht_evpcache_##typ##_insert((cache), TO_HT_KEY(&(key)), \
+                            tlevp, &oldtlevp);                                      \
+                        if (oldtlevp != NULL) {                                     \
+                            typ##_free(oldtlevp);                                   \
+                        }                                                           \
+                        *newmeth = tlevp;                                           \
+                    }                                                               \
+                }                                                                   \
+            }                                                                       \
+        }                                                                           \
     } while (0)
 
 static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
@@ -463,31 +533,35 @@ static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
 {
     EVP_THREAD_CACHE *cache = CRYPTO_THREAD_get_local_ex(CRYPTO_THREAD_LOCAL_EVP_CACHE_KEY,
         ctx);
+    char *merged_props = merge_defult_properties_string(prop, ctx);
     size_t namelen = strlen(name);
-    size_t proplen = prop == NULL ? 0 : strlen(prop);
+    size_t proplen = merged_props == NULL ? 0 : strlen(merged_props);
     EVP_CACHE_KEY key;
+    void *ret = method;
 
     if (ossl_unlikely(cache == NULL)) {
-        return method;
+        goto err;
     } else {
         uint8_t keybuf[namelen + proplen];
 
         memcpy(&keybuf[0], name, namelen);
         if (proplen != 0)
-            memcpy(&keybuf[namelen], prop, proplen);
+            memcpy(&keybuf[namelen], merged_props, proplen);
         HT_INIT_KEY_EXTERNAL(&key, keybuf, namelen + proplen);
 
         switch (operation_id) {
         case OSSL_OP_DIGEST:
             EVP_MD *md;
             TL_CLONE_AND_INSERT(EVP_MD, method, cache->cache, key, &md);
-            return md;
+            ret = md;
             break;
         default:
-            return method;
+            break;
         }
     }
-    return method;
+err:
+    OPENSSL_free(merged_props);
+    return ret;
 }
 
 static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
@@ -497,9 +571,12 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
 {
     EVP_THREAD_CACHE *cache = CRYPTO_THREAD_get_local_ex(CRYPTO_THREAD_LOCAL_EVP_CACHE_KEY,
         ctx);
+    char *merged_props = merge_defult_properties_string(prop, ctx);
+
     size_t namelen = strlen(name);
-    size_t proplen = prop == NULL ? 0 : strlen(prop);
+    size_t proplen = merged_props == NULL ? 0 : strlen(merged_props);
     EVP_CACHE_KEY key;
+    void *ret = NULL;
 
     /*
      * In the nominal case this will be true at most once
@@ -517,47 +594,62 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
 
         cache = OPENSSL_zalloc(sizeof(EVP_THREAD_CACHE));
         if (cache == NULL)
-            return NULL;
+            goto err;
 
         cache->cache = ossl_ht_new(&conf);
         if (cache->cache == NULL) {
             OPENSSL_free(cache);
-            return NULL;
+            goto err;
         }
         if (!CRYPTO_THREAD_set_local_ex(CRYPTO_THREAD_LOCAL_EVP_CACHE_KEY,
                 ctx, cache)) {
             ossl_ht_free(cache->cache);
             OPENSSL_free(cache);
-            return NULL;
+            goto err;
         }
         if (!ossl_init_thread_start(NULL, ctx, free_evp_thread_cache)) {
             CRYPTO_THREAD_set_local_ex(CRYPTO_THREAD_LOCAL_EVP_CACHE_KEY,
                 ctx, NULL);
             ossl_ht_free(cache->cache);
             OPENSSL_free(cache);
-            return NULL;
+            goto err;
         }
         /*
          * On cache creation, its empty, so always return null here
+         * by jumping to err;
          */
-        return NULL;
+        goto err;
     } else {
         uint8_t keybuf[namelen + proplen];
         HT_VALUE *v = NULL;
+        uint64_t current_flush_gen = tsan_load(&flush_generation);
+
+        if (current_flush_gen != cache->flush_generation) {
+            ossl_ht_flush(cache->cache);
+            cache->flush_generation = current_flush_gen;
+            goto err;
+        }
 
         memcpy(&keybuf[0], name, namelen);
         if (proplen != 0)
-            memcpy(&keybuf[namelen], prop, proplen);
+            memcpy(&keybuf[namelen], merged_props, proplen);
         HT_INIT_KEY_EXTERNAL(&key, keybuf, namelen + proplen);
         switch (operation_id) {
         case OSSL_OP_DIGEST:
-            return ossl_ht_evpcache_EVP_MD_get(cache->cache, TO_HT_KEY(&key), &v);
+            EVP_MD *md = ossl_ht_evpcache_EVP_MD_get(cache->cache, TO_HT_KEY(&key), &v);
+            if (md != NULL) {
+                /* We don't need to atomically mutate refcnt when its thread local */
+                md->refcnt.val++;
+            }
+            ret = md;
             break;
         default:
-            return NULL;
+            break;
         }
     }
-    return NULL;
+err:
+    OPENSSL_free(merged_props);
+    return ret;
 }
 
 void *evp_generic_fetch(OSSL_LIB_CTX *libctx, int operation_id,
@@ -573,8 +665,7 @@ void *evp_generic_fetch(OSSL_LIB_CTX *libctx, int operation_id,
         name, properties);
 
     if (method != NULL)
-        return evp_thread_local_store(libctx, operation_id, name,
-            properties, method);
+        return method;
 
     methdata.libctx = libctx;
     methdata.tmp_store = NULL;

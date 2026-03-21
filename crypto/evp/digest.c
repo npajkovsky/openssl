@@ -991,8 +991,12 @@ int EVP_MD_up_ref(EVP_MD *md)
 {
     int ref = 0;
 
-    if (md->origin == EVP_ORIG_DYNAMIC)
-        CRYPTO_UP_REF(&md->refcnt, &ref);
+    if (md->origin != EVP_ORIG_GLOBAL) {
+        if (md->origin == EVP_ORIG_THREAD_LOCAL)
+            md->refcnt.val++;
+        else
+            CRYPTO_UP_REF(&md->refcnt, &ref);
+    }
     return 1;
 }
 
@@ -1000,10 +1004,15 @@ void EVP_MD_free(EVP_MD *md)
 {
     int i;
 
-    if (md == NULL || md->origin != EVP_ORIG_DYNAMIC)
+    if (md == NULL || md->origin == EVP_ORIG_GLOBAL)
         return;
 
-    CRYPTO_DOWN_REF(&md->refcnt, &i);
+    if (md->origin == EVP_ORIG_THREAD_LOCAL) {
+        md->refcnt.val--;
+        i = md->refcnt.val;
+    } else {
+        CRYPTO_DOWN_REF(&md->refcnt, &i);
+    }
     if (i > 0)
         return;
 
