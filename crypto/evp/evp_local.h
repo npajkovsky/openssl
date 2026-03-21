@@ -125,6 +125,7 @@ struct evp_keymgmt_st {
     int id; /* libcrypto internal */
 
     int name_id;
+    int origin;
     /* NID for the legacy alg if there is one */
     int legacy_alg;
     char *type_name;
