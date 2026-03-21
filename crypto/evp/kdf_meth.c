@@ -22,7 +22,10 @@ static int evp_kdf_up_ref(void *vkdf)
     EVP_KDF *kdf = (EVP_KDF *)vkdf;
     int ref = 0;
 
-    CRYPTO_UP_REF(&kdf->refcnt, &ref);
+    if (kdf->origin == EVP_ORIG_THREAD_LOCAL)
+        kdf->refcnt.val++;
+    else
+        CRYPTO_UP_REF(&kdf->refcnt, &ref);
     return 1;
 }
 
@@ -34,7 +37,12 @@ static void evp_kdf_free(void *vkdf)
     if (kdf == NULL)
         return;
 
-    CRYPTO_DOWN_REF(&kdf->refcnt, &ref);
+    if (kdf->origin == EVP_ORIG_THREAD_LOCAL) {
+        kdf->refcnt.val--;
+        ref = kdf->refcnt.val;
+    } else {
+        CRYPTO_DOWN_REF(&kdf->refcnt, &ref);
+    }
     if (ref > 0)
         return;
     OPENSSL_free(kdf->type_name);
@@ -52,6 +60,7 @@ static void *evp_kdf_new(void)
         OPENSSL_free(kdf);
         return NULL;
     }
+    kdf->origin = EVP_ORIG_DYNAMIC;
     return kdf;
 }
 

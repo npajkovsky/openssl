@@ -11,6 +11,7 @@
 #include <openssl/types.h>
 #include <openssl/evp.h>
 #include <openssl/core.h>
+#include <openssl/kdf.h>
 #include "internal/cryptlib.h"
 #include "internal/thread_once.h"
 #include "internal/property.h"
@@ -39,6 +40,7 @@ static TSAN_QUALIFIER uint64_t flush_generation = 0;
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_MD, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_CIPHER, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_MAC, evpcache, static)
+IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_KDF, evpcache, static)
 
 #define NAME_SEPARATOR ':'
 
@@ -427,6 +429,7 @@ static void evp_thread_local_free(HT_VALUE *val)
     TL_FREE(EVP_MD, val);
     TL_FREE(EVP_CIPHER, val);
     TL_FREE(EVP_MAC, val);
+    TL_FREE(EVP_KDF, val);
 }
 
 static void free_evp_thread_cache(void *arg)
@@ -569,6 +572,11 @@ static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
             TL_CLONE_AND_INSERT(EVP_MAC, method, cache->cache, key, &mac);
             ret = mac;
             break;
+        case OSSL_OP_KDF:
+            EVP_KDF *kdf;
+            TL_CLONE_AND_INSERT(EVP_KDF, method, cache->cache, key, &kdf);
+            ret = kdf;
+            break;
         default:
             break;
         }
@@ -668,6 +676,13 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
             if (mac != NULL)
                 mac->refcnt.val++;
             ret = mac;
+            break;
+        case OSSL_OP_KDF:
+            EVP_KDF *kdf = ossl_ht_evpcache_EVP_KDF_get(cache->cache, TO_HT_KEY(&key), &v);
+            if (kdf != NULL)
+                kdf->refcnt.val++;
+            ret = kdf;
+            break;
         default:
             break;
         }
