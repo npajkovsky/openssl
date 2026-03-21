@@ -38,6 +38,7 @@ static TSAN_QUALIFIER uint64_t flush_generation = 0;
 
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_MD, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_CIPHER, evpcache, static)
+IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_MAC, evpcache, static)
 
 #define NAME_SEPARATOR ':'
 
@@ -425,6 +426,7 @@ static void evp_thread_local_free(HT_VALUE *val)
 {
     TL_FREE(EVP_MD, val);
     TL_FREE(EVP_CIPHER, val);
+    TL_FREE(EVP_MAC, val);
 }
 
 static void free_evp_thread_cache(void *arg)
@@ -562,6 +564,11 @@ static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
             TL_CLONE_AND_INSERT(EVP_CIPHER, method, cache->cache, key, &cph);
             ret = cph;
             break;
+        case OSSL_OP_MAC:
+            EVP_MAC *mac;
+            TL_CLONE_AND_INSERT(EVP_MAC, method, cache->cache, key, &mac);
+            ret = mac;
+            break;
         default:
             break;
         }
@@ -656,6 +663,11 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
                 cph->refcnt.val++;
             ret = cph;
             break;
+        case OSSL_OP_MAC:
+            EVP_MAC *mac = ossl_ht_evpcache_EVP_MAC_get(cache->cache, TO_HT_KEY(&key), &v);
+            if (mac != NULL)
+                mac->refcnt.val++;
+            ret = mac;
         default:
             break;
         }

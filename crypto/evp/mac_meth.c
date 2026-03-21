@@ -21,7 +21,10 @@ static int evp_mac_up_ref(void *vmac)
     EVP_MAC *mac = vmac;
     int ref = 0;
 
-    CRYPTO_UP_REF(&mac->refcnt, &ref);
+    if (mac->origin == EVP_ORIG_THREAD_LOCAL)
+        mac->refcnt.val++;
+    else
+        CRYPTO_UP_REF(&mac->refcnt, &ref);
     return 1;
 }
 
@@ -33,7 +36,13 @@ static void evp_mac_free(void *vmac)
     if (mac == NULL)
         return;
 
-    CRYPTO_DOWN_REF(&mac->refcnt, &ref);
+    if (mac->origin == EVP_ORIG_THREAD_LOCAL) {
+        mac->refcnt.val--;
+        ref = mac->refcnt.val;
+    } else {
+        CRYPTO_DOWN_REF(&mac->refcnt, &ref);
+    }
+
     if (ref > 0)
         return;
     OPENSSL_free(mac->type_name);
@@ -51,6 +60,7 @@ static void *evp_mac_new(void)
         evp_mac_free(mac);
         return NULL;
     }
+    mac->origin = EVP_ORIG_DYNAMIC;
     return mac;
 }
 
