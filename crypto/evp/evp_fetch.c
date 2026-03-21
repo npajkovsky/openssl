@@ -45,6 +45,7 @@ IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_RAND, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_KEYMGMT, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_KEYEXCH, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_SIGNATURE, evpcache, static)
+IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_ASYM_CIPHER, evpcache, static)
 
 #define NAME_SEPARATOR ':'
 
@@ -438,6 +439,7 @@ static void evp_thread_local_free(HT_VALUE *val)
     TL_FREE(EVP_KEYMGMT, val);
     TL_FREE(EVP_KEYEXCH, val);
     TL_FREE(EVP_SIGNATURE, val);
+    TL_FREE(EVP_ASYM_CIPHER, val);
 }
 
 static void free_evp_thread_cache(void *arg)
@@ -606,6 +608,11 @@ static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
             TL_CLONE_AND_INSERT(EVP_SIGNATURE, method, cache->cache, key, &sig);
             ret = sig;
             break;
+        case OSSL_OP_ASYM_CIPHER:
+            EVP_ASYM_CIPHER *acp;
+            TL_CLONE_AND_INSERT(EVP_ASYM_CIPHER, method, cache->cache, key, &acp);
+            ret = acp;
+            break;
         default:
             break;
         }
@@ -735,6 +742,12 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
             if (sig != NULL)
                 sig->refcnt.val++;
             ret = sig;
+            break;
+        case OSSL_OP_ASYM_CIPHER:
+            EVP_ASYM_CIPHER *acp = ossl_ht_evpcache_EVP_ASYM_CIPHER_get(cache->cache, TO_HT_KEY(&key), &v);
+            if (acp != NULL)
+                acp->refcnt.val++;
+            ret = acp;
             break;
         default:
             break;
