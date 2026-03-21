@@ -1559,8 +1559,12 @@ int EVP_CIPHER_up_ref(EVP_CIPHER *cipher)
 {
     int ref = 0;
 
-    if (cipher->origin == EVP_ORIG_DYNAMIC)
-        CRYPTO_UP_REF(&cipher->refcnt, &ref);
+    if (cipher->origin != EVP_ORIG_GLOBAL) {
+        if (cipher->origin == EVP_ORIG_THREAD_LOCAL)
+            cipher->refcnt.val++;
+        else
+            CRYPTO_UP_REF(&cipher->refcnt, &ref);
+    }
     return 1;
 }
 
@@ -1576,10 +1580,15 @@ void EVP_CIPHER_free(EVP_CIPHER *cipher)
 {
     int i;
 
-    if (cipher == NULL || cipher->origin != EVP_ORIG_DYNAMIC)
+    if (cipher == NULL || cipher->origin == EVP_ORIG_GLOBAL)
         return;
 
-    CRYPTO_DOWN_REF(&cipher->refcnt, &i);
+    if (cipher->origin == EVP_ORIG_THREAD_LOCAL) {
+        cipher->refcnt.val--;
+        i = cipher->refcnt.val;
+    } else {
+        CRYPTO_DOWN_REF(&cipher->refcnt, &i);
+    }
     if (i > 0)
         return;
     evp_cipher_free_int(cipher);

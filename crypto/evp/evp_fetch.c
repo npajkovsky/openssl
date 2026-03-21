@@ -37,6 +37,7 @@ typedef struct evp_thread_cache {
 static TSAN_QUALIFIER uint64_t flush_generation = 0;
 
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_MD, evpcache, static)
+IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_CIPHER, evpcache, static)
 
 #define NAME_SEPARATOR ':'
 
@@ -423,6 +424,7 @@ void evp_flush_thread_local_caches()
 static void evp_thread_local_free(HT_VALUE *val)
 {
     TL_FREE(EVP_MD, val);
+    TL_FREE(EVP_CIPHER, val);
 }
 
 static void free_evp_thread_cache(void *arg)
@@ -555,6 +557,11 @@ static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
             TL_CLONE_AND_INSERT(EVP_MD, method, cache->cache, key, &md);
             ret = md;
             break;
+        case OSSL_OP_CIPHER:
+            EVP_CIPHER *cph;
+            TL_CLONE_AND_INSERT(EVP_CIPHER, method, cache->cache, key, &cph);
+            ret = cph;
+            break;
         default:
             break;
         }
@@ -642,6 +649,12 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
                 md->refcnt.val++;
             }
             ret = md;
+            break;
+        case OSSL_OP_CIPHER:
+            EVP_CIPHER *cph = ossl_ht_evpcache_EVP_CIPHER_get(cache->cache, TO_HT_KEY(&key), &v);
+            if (cph != NULL)
+                cph->refcnt.val++;
+            ret = cph;
             break;
         default:
             break;
