@@ -41,6 +41,7 @@ IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_MD, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_CIPHER, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_MAC, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_KDF, evpcache, static)
+IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_RAND, evpcache, static)
 
 #define NAME_SEPARATOR ':'
 
@@ -430,6 +431,7 @@ static void evp_thread_local_free(HT_VALUE *val)
     TL_FREE(EVP_CIPHER, val);
     TL_FREE(EVP_MAC, val);
     TL_FREE(EVP_KDF, val);
+    TL_FREE(EVP_RAND, val);
 }
 
 static void free_evp_thread_cache(void *arg)
@@ -577,6 +579,11 @@ static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
             TL_CLONE_AND_INSERT(EVP_KDF, method, cache->cache, key, &kdf);
             ret = kdf;
             break;
+        case OSSL_OP_RAND:
+            EVP_RAND *rand;
+            TL_CLONE_AND_INSERT(EVP_RAND, method, cache->cache, key, &rand);
+            ret = rand;
+            break;
         default:
             break;
         }
@@ -682,6 +689,12 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
             if (kdf != NULL)
                 kdf->refcnt.val++;
             ret = kdf;
+            break;
+        case OSSL_OP_RAND:
+            EVP_RAND *rand = ossl_ht_evpcache_EVP_RAND_get(cache->cache, TO_HT_KEY(&key), &v);
+            if (rand != NULL)
+                rand->refcnt.val++;
+            ret = rand;
             break;
         default:
             break;
