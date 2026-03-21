@@ -281,6 +281,7 @@ struct evp_asym_cipher_st {
 
 struct evp_kem_st {
     int name_id;
+    int origin;
     char *type_name;
     const char *description;
     OSSL_PROVIDER *prov;
