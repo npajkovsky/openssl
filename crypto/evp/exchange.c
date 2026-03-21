@@ -42,6 +42,7 @@ static EVP_KEYEXCH *evp_keyexch_new(OSSL_PROVIDER *prov)
         OPENSSL_free(exchange);
         return NULL;
     }
+    exchange->origin = EVP_ORIG_DYNAMIC;
     exchange->prov = prov;
 
     return exchange;
@@ -164,7 +165,12 @@ void EVP_KEYEXCH_free(EVP_KEYEXCH *exchange)
 
     if (exchange == NULL)
         return;
-    CRYPTO_DOWN_REF(&exchange->refcnt, &i);
+    if (exchange->origin == EVP_ORIG_THREAD_LOCAL) {
+        exchange->refcnt.val--;
+        i = exchange->refcnt.val;
+    } else {
+        CRYPTO_DOWN_REF(&exchange->refcnt, &i);
+    }
     if (i > 0)
         return;
     OPENSSL_free(exchange->type_name);
@@ -177,7 +183,10 @@ int EVP_KEYEXCH_up_ref(EVP_KEYEXCH *exchange)
 {
     int ref = 0;
 
-    CRYPTO_UP_REF(&exchange->refcnt, &ref);
+    if (exchange->origin == EVP_ORIG_THREAD_LOCAL)
+        exchange->refcnt.val++;
+    else
+        CRYPTO_UP_REF(&exchange->refcnt, &ref);
     return 1;
 }
 

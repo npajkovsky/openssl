@@ -43,6 +43,7 @@ IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_MAC, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_KDF, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_RAND, evpcache, static)
 IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_KEYMGMT, evpcache, static)
+IMPLEMENT_HT_VALUE_TYPE_FNS(EVP_KEYEXCH, evpcache, static)
 
 #define NAME_SEPARATOR ':'
 
@@ -434,6 +435,7 @@ static void evp_thread_local_free(HT_VALUE *val)
     TL_FREE(EVP_KDF, val);
     TL_FREE(EVP_RAND, val);
     TL_FREE(EVP_KEYMGMT, val);
+    TL_FREE(EVP_KEYEXCH, val);
 }
 
 static void free_evp_thread_cache(void *arg)
@@ -592,6 +594,11 @@ static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
             TL_CLONE_AND_INSERT(EVP_KEYMGMT, method, cache->cache, key, &kmg);
             ret = kmg;
             break;
+        case OSSL_OP_KEYEXCH:
+            EVP_KEYEXCH *kex;
+            TL_CLONE_AND_INSERT(EVP_KEYEXCH, method, cache->cache, key, &kex);
+            ret = kex;
+            break;
         default:
             break;
         }
@@ -709,6 +716,12 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
             if (kmg != NULL)
                 kmg->refcnt.val++;
             ret = kmg;
+            break;
+        case OSSL_OP_KEYEXCH:
+            EVP_KEYEXCH *kex = ossl_ht_evpcache_EVP_KEYEXCH_get(cache->cache, TO_HT_KEY(&key), &v);
+            if (kex != NULL)
+                kex->refcnt.val++;
+            ret = kex;
             break;
         default:
             break;
