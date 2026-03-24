@@ -132,10 +132,9 @@ DEFINE_SPARSE_ARRAY_OF(ALGORITHM);
 DEFINE_STACK_OF(ALGORITHM)
 
 HT_START_KEY_DEFN(frozen_cache_key)
-HT_DEF_KEY_FIELD_CHAR_ARRAY(name, 64)
-/* TODO(FREEZE): allow variable length propq */
-HT_DEF_KEY_FIELD_CHAR_ARRAY(propq, 64)
 HT_DEF_KEY_FIELD(op_id, unsigned int)
+HT_DEF_KEY_FIELD_CHAR_ARRAY(name, 64)
+HT_DEF_KEY_FIELD_CHAR_ARRAY(propq, 64)
 HT_END_KEY_DEFN(FROZEN_CACHE_KEY)
 
 typedef struct ossl_global_properties_st {
@@ -1126,16 +1125,14 @@ int ossl_frozen_method_store_cache_get(OSSL_METHOD_STORE *store,
     FROZEN_CACHE_KEY key;
     HT_VALUE *val;
 
-    if (store == NULL
-        || alg_name == NULL
-        || prop_query == NULL
-        || store->frozen_algs == NULL)
+    if (store == NULL || alg_name == NULL)
         return 0;
 
-    HT_INIT_KEY(&key);
-    HT_SET_KEY_STRING_CASE(&key, name, alg_name);
-    HT_SET_KEY_STRING(&key, propq, prop_query);
-    HT_SET_KEY_FIELD(&key, op_id, operation_id);
+    HT_INIT_RAW_KEY(&key);
+    HT_COPY_RAW_KEY(TO_HT_KEY(&key), (uint8_t *)&operation_id, sizeof(operation_id));
+    HT_COPY_RAW_KEY_CASE(TO_HT_KEY(&key), alg_name, strlen(alg_name));
+    if (*prop_query != '\0')
+        HT_COPY_RAW_KEY(TO_HT_KEY(&key), (const uint8_t *)prop_query, strlen(prop_query));
 
     val = ossl_ht_get(store->frozen_algs, TO_HT_KEY(&key));
     if (val == NULL)
@@ -1171,10 +1168,11 @@ static int freeze_alg(OSSL_METHOD_STORE *store, ALGORITHM *alg,
     HT_VALUE val = { 0 };
     const OSSL_PROVIDER *prov = NULL;
 
-    HT_INIT_KEY(&key);
-    HT_SET_KEY_STRING_CASE(&key, name, alg_name);
-    HT_SET_KEY_STRING(&key, propq, propq);
-    HT_SET_KEY_FIELD(&key, op_id, operation_id);
+    HT_INIT_RAW_KEY(&key);
+    HT_COPY_RAW_KEY(TO_HT_KEY(&key), (uint8_t *)&operation_id, sizeof(operation_id));
+    HT_COPY_RAW_KEY_CASE(TO_HT_KEY(&key), alg_name, strlen(alg_name));
+    if (*propq != '\0')
+        HT_COPY_RAW_KEY(TO_HT_KEY(&key), (const uint8_t *)propq, strlen(propq));
 
     if (ossl_ht_get(store->frozen_algs, TO_HT_KEY(&key)) != NULL)
         return 1;
