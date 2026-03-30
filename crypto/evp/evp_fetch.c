@@ -463,11 +463,10 @@ static void free_evp_thread_cache(void *arg)
     OPENSSL_free(cache);
 }
 
-static ossl_inline char *merge_defult_properties_string(int op, const char *name, const char *prop, OSSL_LIB_CTX *ctx)
+static ossl_inline char *merge_defult_properties_string(int op, const char *name, const char *prop,
+    OSSL_LIB_CTX *ctx, char *buf, size_t buf_len)
 {
     OSSL_PROPERTY_LIST *pq = NULL, **gpq = NULL, *pfull = NULL;
-    char *full_string = NULL;
-    size_t bufsize;
 
     gpq = ossl_ctx_global_properties(ctx, 0);
 
@@ -475,31 +474,23 @@ static ossl_inline char *merge_defult_properties_string(int op, const char *name
         /*
          * Both null, an empty string works here
          */
-        bufsize = snprintf(NULL, 0, "%d%s", op, name);
-        full_string = OPENSSL_zalloc(bufsize + 1);
-        sprintf(full_string, "%d%s", op, name);
-        return full_string;
+        snprintf(buf, buf_len, "%d%s", op, name);
+        return buf;
     } else if (*gpq == NULL) {
         /*
          * PQ Is not null, so our property string is
          * just the prop_query
          */
-        bufsize = snprintf(NULL, 0, "%d%s%s", op, name, prop);
-        full_string = OPENSSL_zalloc(bufsize + 1);
-        sprintf(full_string, "%d%s%s", op, name, prop);
-        return full_string;
+        snprintf(buf, buf_len, "%d%s%s", op, name, prop);
+        return buf;
     } else if (prop == NULL) {
         /*
          * gpq not null, just need to turn that into a string
          */
-        size_t basesize;
         size_t offset;
-        bufsize = ossl_property_list_to_string(ctx, *gpq, NULL, 0);
-        basesize = snprintf(NULL, 0, "%d%s", op, name);
-        full_string = OPENSSL_zalloc(bufsize + basesize + 1);
-        offset = sprintf(full_string, "%d%s", op, name);
-        ossl_property_list_to_string(ctx, *gpq, &full_string[offset], bufsize);
-        return full_string;
+        offset = snprintf(buf, buf_len, "%d%s", op, name);
+        ossl_property_list_to_string(ctx, *gpq, &buf[offset], buf_len - offset);
+        return buf;
     } else {
         /*
          * both non-null, need to merge
@@ -508,14 +499,11 @@ static ossl_inline char *merge_defult_properties_string(int op, const char *name
         size_t offset;
         pq = ossl_parse_query(ctx, prop, 0);
         pfull = ossl_property_merge(pq, *gpq);
-        bufsize = ossl_property_list_to_string(ctx, pfull, NULL, 0);
-        basesize = snprintf(NULL, 0, "%d%s", op, name);
-        full_string = OPENSSL_zalloc(bufsize + basesize + 1);
-        offset = sprintf(full_string, "%d%s", op, name);
-        ossl_property_list_to_string(ctx, pfull, &full_string[offset], bufsize);
+        offset = snprintf(buf, buf_len, "%d%s", op, name);
+        ossl_property_list_to_string(ctx, pfull, &buf[offset], buf_len - offset);
         ossl_property_free(pfull);
         ossl_property_free(pq);
-        return full_string;
+        return buf;
     }
     return NULL;
 }
@@ -568,18 +556,15 @@ static ossl_inline char *merge_defult_properties_string(int op, const char *name
 static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
     EVP_THREAD_CACHE *cache,
     int operation_id,
-    const char *name,
-    const char *prop,
+    const char *merged_props,
     void *method)
 {
     EVP_CACHE_KEY key;
     void *ret = method;
-    char *merged_props = NULL;
 
     if (ossl_unlikely(cache == NULL)) {
         goto err;
     } else {
-        merged_props = merge_defult_properties_string(operation_id, name, prop, ctx);
         HT_INIT_KEY_EXTERNAL(&key, (uint8_t *)merged_props, strlen(merged_props));
 
         switch (operation_id) {
@@ -643,19 +628,16 @@ static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
         }
     }
 err:
-    OPENSSL_free(merged_props);
     return ret;
 }
 
 static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
     EVP_THREAD_CACHE *cache,
     int operation_id,
-    const char *name,
-    const char *prop)
+    const char *merged_props)
 {
     EVP_CACHE_KEY key;
     void *ret = NULL;
-    char *merged_props = NULL;
 
     /*
      * In the nominal case this will be true at most once
@@ -708,7 +690,6 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
             goto err;
         }
 
-        merged_props = merge_defult_properties_string(operation_id, name, prop, ctx);
         HT_INIT_KEY_EXTERNAL(&key, (uint8_t *)merged_props, strlen(merged_props));
         switch (operation_id) {
         case OSSL_OP_DIGEST:
@@ -784,7 +765,6 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
         }
     }
 err:
-    OPENSSL_free(merged_props);
     return ret;
 }
 
@@ -799,8 +779,10 @@ void *evp_generic_fetch(OSSL_LIB_CTX *libctx, int operation_id,
     EVP_THREAD_CACHE *cache = CRYPTO_THREAD_get_local_ex(CRYPTO_THREAD_LOCAL_EVP_CACHE_KEY,
         libctx);
     struct evp_method_data_st methdata;
-    void *method = evp_thread_local_fetch(libctx, cache, operation_id,
-        name, properties);
+    char buf[512];
+    const char *merged_props = merge_defult_properties_string(operation_id, name,
+        properties, libctx, buf, 512);
+    void *method = evp_thread_local_fetch(libctx, cache, operation_id, merged_props);
 
     if (method != NULL)
         return method;
@@ -812,9 +794,9 @@ void *evp_generic_fetch(OSSL_LIB_CTX *libctx, int operation_id,
         new_method, up_ref_method, free_method);
     dealloc_tmp_evp_method_store(methdata.tmp_store);
     if (method != NULL) {
-        return evp_thread_local_store(libctx, cache, operation_id, name,
-            properties, method);
+        method = evp_thread_local_store(libctx, cache, operation_id, merged_props, method);
     }
+out:
     return method;
 }
 
