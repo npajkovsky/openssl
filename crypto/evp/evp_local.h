@@ -427,4 +427,4 @@ int evp_names_do_all(OSSL_PROVIDER *prov, int number,
     void *data);
 int evp_cipher_cache_constants(EVP_CIPHER *cipher);
 
-void evp_flush_thread_local_caches();
+void evp_flush_thread_local_caches(void);

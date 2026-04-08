@@ -421,7 +421,7 @@ inner_evp_generic_fetch(struct evp_method_data_st *methdata,
     return method;
 }
 
-void evp_flush_thread_local_caches()
+void evp_flush_thread_local_caches(void)
 {
     tsan_counter(&flush_generation);
 }
