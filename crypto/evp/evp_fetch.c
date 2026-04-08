@@ -13,6 +13,7 @@
  */
 
 #include <stddef.h>
+#include <stdio.h>
 #include <openssl/types.h>
 #include <openssl/evp.h>
 #include <openssl/core.h>
@@ -560,6 +561,17 @@ static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
     EVP_CACHE_KEY key;
     void *ret = method;
     EVP_THREAD_CACHE *cache = *c;
+    EVP_MD *md;
+    EVP_CIPHER *cph;
+    EVP_MAC *mac;
+    EVP_KDF *kdf;
+    EVP_RAND *rand;
+    EVP_KEYMGMT *kmg;
+    EVP_KEYEXCH *kex;
+    EVP_SIGNATURE *sig;
+    EVP_ASYM_CIPHER *acp;
+    EVP_KEM *kem;
+    EVP_SKEYMGMT *smg;
 
     if (ossl_unlikely(cache == NULL)) {
         goto err;
@@ -568,57 +580,46 @@ static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
 
         switch (operation_id) {
         case OSSL_OP_DIGEST:
-            EVP_MD *md;
             TL_CLONE_AND_INSERT(EVP_MD, method, cache->cache, key, &md);
             ret = md;
             break;
         case OSSL_OP_CIPHER:
-            EVP_CIPHER *cph;
             TL_CLONE_AND_INSERT(EVP_CIPHER, method, cache->cache, key, &cph);
             ret = cph;
             break;
         case OSSL_OP_MAC:
-            EVP_MAC *mac;
             TL_CLONE_AND_INSERT(EVP_MAC, method, cache->cache, key, &mac);
             ret = mac;
             break;
         case OSSL_OP_KDF:
-            EVP_KDF *kdf;
             TL_CLONE_AND_INSERT(EVP_KDF, method, cache->cache, key, &kdf);
             ret = kdf;
             break;
         case OSSL_OP_RAND:
-            EVP_RAND *rand;
             TL_CLONE_AND_INSERT(EVP_RAND, method, cache->cache, key, &rand);
             ret = rand;
             break;
         case OSSL_OP_KEYMGMT:
-            EVP_KEYMGMT *kmg;
             TL_CLONE_AND_INSERT(EVP_KEYMGMT, method, cache->cache, key, &kmg);
             ret = kmg;
             break;
         case OSSL_OP_KEYEXCH:
-            EVP_KEYEXCH *kex;
             TL_CLONE_AND_INSERT(EVP_KEYEXCH, method, cache->cache, key, &kex);
             ret = kex;
             break;
         case OSSL_OP_SIGNATURE:
-            EVP_SIGNATURE *sig;
             TL_CLONE_AND_INSERT(EVP_SIGNATURE, method, cache->cache, key, &sig);
             ret = sig;
             break;
         case OSSL_OP_ASYM_CIPHER:
-            EVP_ASYM_CIPHER *acp;
             TL_CLONE_AND_INSERT(EVP_ASYM_CIPHER, method, cache->cache, key, &acp);
             ret = acp;
             break;
         case OSSL_OP_KEM:
-            EVP_KEM *kem;
             TL_CLONE_AND_INSERT(EVP_KEM, method, cache->cache, key, &kem);
             ret = kem;
             break;
         case OSSL_OP_SKEYMGMT:
-            EVP_SKEYMGMT *smg;
             TL_CLONE_AND_INSERT(EVP_SKEYMGMT, method, cache->cache, key, &smg);
             ret = smg;
             break;
@@ -636,6 +637,18 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
     EVP_CACHE_KEY key;
     void *ret = NULL;
     EVP_THREAD_CACHE *cache = *c;
+    EVP_MD *md;
+    EVP_CIPHER *cph;
+    EVP_MAC *mac;
+    EVP_KDF *kdf;
+    EVP_RAND *rand;
+    EVP_KEYMGMT *kmg;
+    EVP_KEYEXCH *kex;
+    EVP_SIGNATURE *sig;
+    EVP_ASYM_CIPHER *acp;
+    EVP_KEM *kem;
+    EVP_SKEYMGMT *smg;
+
     /*
      * In the nominal case this will be true at most once
      */
@@ -693,7 +706,7 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
         HT_INIT_KEY_EXTERNAL(&key, (uint8_t *)merged_props, strlen(merged_props));
         switch (operation_id) {
         case OSSL_OP_DIGEST:
-            EVP_MD *md = ossl_ht_evpcache_EVP_MD_get(cache->cache, TO_HT_KEY(&key), &v);
+            md = ossl_ht_evpcache_EVP_MD_get(cache->cache, TO_HT_KEY(&key), &v);
             if (md != NULL) {
                 /* We don't need to atomically mutate refcnt when its thread local */
                 md->refcnt.val++;
@@ -701,61 +714,61 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
             ret = md;
             break;
         case OSSL_OP_CIPHER:
-            EVP_CIPHER *cph = ossl_ht_evpcache_EVP_CIPHER_get(cache->cache, TO_HT_KEY(&key), &v);
+            cph = ossl_ht_evpcache_EVP_CIPHER_get(cache->cache, TO_HT_KEY(&key), &v);
             if (cph != NULL)
                 cph->refcnt.val++;
             ret = cph;
             break;
         case OSSL_OP_MAC:
-            EVP_MAC *mac = ossl_ht_evpcache_EVP_MAC_get(cache->cache, TO_HT_KEY(&key), &v);
+            mac = ossl_ht_evpcache_EVP_MAC_get(cache->cache, TO_HT_KEY(&key), &v);
             if (mac != NULL)
                 mac->refcnt.val++;
             ret = mac;
             break;
         case OSSL_OP_KDF:
-            EVP_KDF *kdf = ossl_ht_evpcache_EVP_KDF_get(cache->cache, TO_HT_KEY(&key), &v);
+            kdf = ossl_ht_evpcache_EVP_KDF_get(cache->cache, TO_HT_KEY(&key), &v);
             if (kdf != NULL)
                 kdf->refcnt.val++;
             ret = kdf;
             break;
         case OSSL_OP_RAND:
-            EVP_RAND *rand = ossl_ht_evpcache_EVP_RAND_get(cache->cache, TO_HT_KEY(&key), &v);
+            rand = ossl_ht_evpcache_EVP_RAND_get(cache->cache, TO_HT_KEY(&key), &v);
             if (rand != NULL)
                 rand->refcnt.val++;
             ret = rand;
             break;
         case OSSL_OP_KEYMGMT:
-            EVP_KEYMGMT *kmg = ossl_ht_evpcache_EVP_KEYMGMT_get(cache->cache, TO_HT_KEY(&key), &v);
+            kmg = ossl_ht_evpcache_EVP_KEYMGMT_get(cache->cache, TO_HT_KEY(&key), &v);
             if (kmg != NULL)
                 kmg->refcnt.val++;
             ret = kmg;
             break;
         case OSSL_OP_KEYEXCH:
-            EVP_KEYEXCH *kex = ossl_ht_evpcache_EVP_KEYEXCH_get(cache->cache, TO_HT_KEY(&key), &v);
+            kex = ossl_ht_evpcache_EVP_KEYEXCH_get(cache->cache, TO_HT_KEY(&key), &v);
             if (kex != NULL)
                 kex->refcnt.val++;
             ret = kex;
             break;
         case OSSL_OP_SIGNATURE:
-            EVP_SIGNATURE *sig = ossl_ht_evpcache_EVP_SIGNATURE_get(cache->cache, TO_HT_KEY(&key), &v);
+            sig = ossl_ht_evpcache_EVP_SIGNATURE_get(cache->cache, TO_HT_KEY(&key), &v);
             if (sig != NULL)
                 sig->refcnt.val++;
             ret = sig;
             break;
         case OSSL_OP_ASYM_CIPHER:
-            EVP_ASYM_CIPHER *acp = ossl_ht_evpcache_EVP_ASYM_CIPHER_get(cache->cache, TO_HT_KEY(&key), &v);
+            acp = ossl_ht_evpcache_EVP_ASYM_CIPHER_get(cache->cache, TO_HT_KEY(&key), &v);
             if (acp != NULL)
                 acp->refcnt.val++;
             ret = acp;
             break;
         case OSSL_OP_KEM:
-            EVP_KEM *kem = ossl_ht_evpcache_EVP_KEM_get(cache->cache, TO_HT_KEY(&key), &v);
+            kem = ossl_ht_evpcache_EVP_KEM_get(cache->cache, TO_HT_KEY(&key), &v);
             if (kem != NULL)
                 kem->refcnt.val++;
             ret = kem;
             break;
         case OSSL_OP_SKEYMGMT:
-            EVP_SKEYMGMT *smg = ossl_ht_evpcache_EVP_SKEYMGMT_get(cache->cache, TO_HT_KEY(&key), &v);
+            smg = ossl_ht_evpcache_EVP_SKEYMGMT_get(cache->cache, TO_HT_KEY(&key), &v);
             if (smg != NULL)
                 smg->refcnt.val++;
             ret = smg;
