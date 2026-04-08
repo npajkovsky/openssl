@@ -553,13 +553,13 @@ static ossl_inline char *merge_defult_properties_string(int op, const char *name
     } while (0)
 
 static ossl_inline void *evp_thread_local_store(OSSL_LIB_CTX *ctx,
-    EVP_THREAD_CACHE *cache,
-    int operation_id,
+    EVP_THREAD_CACHE **c, int operation_id,
     const char *merged_props,
     void *method)
 {
     EVP_CACHE_KEY key;
     void *ret = method;
+    EVP_THREAD_CACHE *cache = *c;
 
     if (ossl_unlikely(cache == NULL)) {
         goto err;
@@ -631,13 +631,11 @@ err:
 }
 
 static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
-    EVP_THREAD_CACHE *cache,
-    int operation_id,
-    const char *merged_props)
+    EVP_THREAD_CACHE **c, int operation_id, const char *merged_props)
 {
     EVP_CACHE_KEY key;
     void *ret = NULL;
-
+    EVP_THREAD_CACHE *cache = *c;
     /*
      * In the nominal case this will be true at most once
      */
@@ -674,6 +672,9 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
             OPENSSL_free(cache);
             goto err;
         }
+
+        *c = cache;
+
         /*
          * On cache creation, its empty, so always return null here
          * by jumping to err;
@@ -781,7 +782,7 @@ void *evp_generic_fetch(OSSL_LIB_CTX *libctx, int operation_id,
     char buf[512];
     const char *merged_props = merge_defult_properties_string(operation_id, name,
         properties, NULL, libctx, buf, 512);
-    void *method = evp_thread_local_fetch(libctx, cache, operation_id, merged_props);
+    void *method = evp_thread_local_fetch(libctx, &cache, operation_id, merged_props);
 
     if (method != NULL)
         return method;
@@ -793,7 +794,7 @@ void *evp_generic_fetch(OSSL_LIB_CTX *libctx, int operation_id,
         new_method, up_ref_method, free_method);
     dealloc_tmp_evp_method_store(methdata.tmp_store);
     if (method != NULL)
-        method = evp_thread_local_store(libctx, cache, operation_id, merged_props, method);
+        method = evp_thread_local_store(libctx, &cache, operation_id, merged_props, method);
     return method;
 }
 
@@ -819,7 +820,7 @@ void *evp_generic_fetch_from_prov(OSSL_PROVIDER *prov, int operation_id,
     const char *merged_props = merge_defult_properties_string(operation_id, name,
         properties, prov, ossl_provider_libctx(prov), buf, 512);
 
-    method = evp_thread_local_fetch(ossl_provider_libctx(prov), cache, operation_id, merged_props);
+    method = evp_thread_local_fetch(ossl_provider_libctx(prov), &cache, operation_id, merged_props);
 
     if (method != NULL)
         return method;
@@ -831,7 +832,7 @@ void *evp_generic_fetch_from_prov(OSSL_PROVIDER *prov, int operation_id,
         new_method, up_ref_method, free_method);
     dealloc_tmp_evp_method_store(methdata.tmp_store);
     if (method != NULL)
-        method = evp_thread_local_store(ossl_provider_libctx(prov), cache, operation_id, merged_props, method);
+        method = evp_thread_local_store(ossl_provider_libctx(prov), &cache, operation_id, merged_props, method);
     return method;
 }
 
