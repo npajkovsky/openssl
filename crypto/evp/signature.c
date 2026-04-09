@@ -459,12 +459,7 @@ void EVP_SIGNATURE_free(EVP_SIGNATURE *signature)
 
     if (signature == NULL)
         return;
-    if (signature->origin == EVP_ORIG_THREAD_LOCAL) {
-        signature->refcnt.val--;
-        i = signature->refcnt.val;
-    } else {
-        CRYPTO_DOWN_REF(&signature->refcnt, &i);
-    }
+    CRYPTO_DOWN_REF(&signature->refcnt, &i);
 
     if (i > 0)
         return;
@@ -478,10 +473,7 @@ int EVP_SIGNATURE_up_ref(EVP_SIGNATURE *signature)
 {
     int ref = 0;
 
-    if (signature->origin == EVP_ORIG_THREAD_LOCAL)
-        signature->refcnt.val++;
-    else
-        CRYPTO_UP_REF(&signature->refcnt, &ref);
+    CRYPTO_UP_REF(&signature->refcnt, &ref);
     return 1;
 }
 

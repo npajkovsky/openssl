@@ -21,10 +21,7 @@ static int evp_mac_up_ref(void *vmac)
     EVP_MAC *mac = vmac;
     int ref = 0;
 
-    if (mac->origin == EVP_ORIG_THREAD_LOCAL)
-        mac->refcnt.val++;
-    else
-        CRYPTO_UP_REF(&mac->refcnt, &ref);
+    CRYPTO_UP_REF(&mac->refcnt, &ref);
     return 1;
 }
 
@@ -36,12 +33,7 @@ static void evp_mac_free(void *vmac)
     if (mac == NULL)
         return;
 
-    if (mac->origin == EVP_ORIG_THREAD_LOCAL) {
-        mac->refcnt.val--;
-        ref = mac->refcnt.val;
-    } else {
-        CRYPTO_DOWN_REF(&mac->refcnt, &ref);
-    }
+    CRYPTO_DOWN_REF(&mac->refcnt, &ref);
 
     if (ref > 0)
         return;

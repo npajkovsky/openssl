@@ -26,14 +26,8 @@ static int evp_rand_up_ref(void *vrand)
     EVP_RAND *rand = (EVP_RAND *)vrand;
     int ref = 0;
 
-    if (rand != NULL) {
-        if (rand->origin == EVP_ORIG_THREAD_LOCAL) {
-            rand->refcnt.val++;
-            return 1;
-        } else {
-            return CRYPTO_UP_REF(&rand->refcnt, &ref);
-        }
-    }
+    if (rand != NULL)
+        return CRYPTO_UP_REF(&rand->refcnt, &ref);
     return 1;
 }
 
@@ -44,12 +38,7 @@ static void evp_rand_free(void *vrand)
 
     if (rand == NULL)
         return;
-    if (rand->origin == EVP_ORIG_THREAD_LOCAL) {
-        rand->refcnt.val--;
-        ref = rand->refcnt.val;
-    } else {
-        CRYPTO_DOWN_REF(&rand->refcnt, &ref);
-    }
+    CRYPTO_DOWN_REF(&rand->refcnt, &ref);
     if (ref > 0)
         return;
     OPENSSL_free(rand->type_name);

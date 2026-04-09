@@ -187,7 +187,6 @@ struct evp_kdf_st {
 
 #define EVP_ORIG_DYNAMIC 0
 #define EVP_ORIG_GLOBAL 1
-#define EVP_ORIG_THREAD_LOCAL 2
 
 struct evp_md_st {
     /* nid */

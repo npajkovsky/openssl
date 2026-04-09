@@ -296,10 +296,7 @@ int EVP_KEYMGMT_up_ref(EVP_KEYMGMT *keymgmt)
 {
     int ref = 0;
 
-    if (keymgmt->origin == EVP_ORIG_THREAD_LOCAL)
-        keymgmt->refcnt.val++;
-    else
-        CRYPTO_UP_REF(&keymgmt->refcnt, &ref);
+    CRYPTO_UP_REF(&keymgmt->refcnt, &ref);
     return 1;
 }
 
@@ -310,12 +307,7 @@ void EVP_KEYMGMT_free(EVP_KEYMGMT *keymgmt)
     if (keymgmt == NULL)
         return;
 
-    if (keymgmt->origin == EVP_ORIG_THREAD_LOCAL) {
-        keymgmt->refcnt.val--;
-        ref = keymgmt->refcnt.val;
-    } else {
-        CRYPTO_DOWN_REF(&keymgmt->refcnt, &ref);
-    }
+    CRYPTO_DOWN_REF(&keymgmt->refcnt, &ref);
     if (ref > 0)
         return;
     OPENSSL_free(keymgmt->type_name);

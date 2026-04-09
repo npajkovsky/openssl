@@ -165,12 +165,7 @@ void EVP_KEYEXCH_free(EVP_KEYEXCH *exchange)
 
     if (exchange == NULL)
         return;
-    if (exchange->origin == EVP_ORIG_THREAD_LOCAL) {
-        exchange->refcnt.val--;
-        i = exchange->refcnt.val;
-    } else {
-        CRYPTO_DOWN_REF(&exchange->refcnt, &i);
-    }
+    CRYPTO_DOWN_REF(&exchange->refcnt, &i);
     if (i > 0)
         return;
     OPENSSL_free(exchange->type_name);
@@ -183,10 +178,7 @@ int EVP_KEYEXCH_up_ref(EVP_KEYEXCH *exchange)
 {
     int ref = 0;
 
-    if (exchange->origin == EVP_ORIG_THREAD_LOCAL)
-        exchange->refcnt.val++;
-    else
-        CRYPTO_UP_REF(&exchange->refcnt, &ref);
+    CRYPTO_UP_REF(&exchange->refcnt, &ref);
     return 1;
 }
 

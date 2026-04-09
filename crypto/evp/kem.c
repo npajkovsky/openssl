@@ -436,12 +436,7 @@ void EVP_KEM_free(EVP_KEM *kem)
     if (kem == NULL)
         return;
 
-    if (kem->origin == EVP_ORIG_THREAD_LOCAL) {
-        kem->refcnt.val--;
-        i = kem->refcnt.val;
-    } else {
-        CRYPTO_DOWN_REF(&kem->refcnt, &i);
-    }
+    CRYPTO_DOWN_REF(&kem->refcnt, &i);
     if (i > 0)
         return;
     OPENSSL_free(kem->type_name);
@@ -454,10 +449,7 @@ int EVP_KEM_up_ref(EVP_KEM *kem)
 {
     int ref = 0;
 
-    if (kem->origin == EVP_ORIG_THREAD_LOCAL)
-        kem->refcnt.val++;
-    else
-        CRYPTO_UP_REF(&kem->refcnt, &ref);
+    CRYPTO_UP_REF(&kem->refcnt, &ref);
     return 1;
 }
 

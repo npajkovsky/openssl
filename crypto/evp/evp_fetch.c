@@ -427,14 +427,11 @@ void evp_flush_thread_local_caches(void)
     tsan_counter(&flush_generation);
 }
 
-#define TL_FREE(typ, val)                                          \
-    do {                                                           \
-        typ *evp = ossl_ht_evpcache_##typ##_from_value(val);       \
-                                                                   \
-        if (evp != NULL && evp->origin == EVP_ORIG_THREAD_LOCAL) { \
-            typ##_free(evp);                                       \
-            return;                                                \
-        }                                                          \
+#define TL_FREE(typ, val)                                    \
+    do {                                                     \
+        typ *evp = ossl_ht_evpcache_##typ##_from_value(val); \
+                                                             \
+        typ##_free(evp);                                     \
     } while (0)
 
 static void evp_thread_local_free(HT_VALUE *val)
@@ -541,12 +538,11 @@ static ossl_inline char *merge_defult_properties_string(int op, const char *name
                         OPENSSL_free(tlevp->type_name);                                 \
                         OPENSSL_free(tlevp);                                            \
                     } else {                                                            \
-                        tlevp->origin = EVP_ORIG_THREAD_LOCAL;                          \
                         if (ossl_ht_evpcache_##typ##_insert((cache), TO_HT_KEY(&(key)), \
                                 tlevp, NULL)                                            \
                             <= 0) {                                                     \
                             ossl_provider_free(tlevp->prov);                            \
-                            tlevp->refcnt.val--;                                        \
+                            typ##_free(tlevp);                                          \
                             typ##_free(tlevp);                                          \
                             *newmeth = meth;                                            \
                         } else {                                                        \
