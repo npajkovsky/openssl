@@ -651,6 +651,10 @@ static ossl_inline void *evp_thread_local_fetch(OSSL_LIB_CTX *ctx,
     EVP_KEM *kem;
     EVP_SKEYMGMT *smg;
 
+    ctx = ossl_lib_ctx_get_concrete(ctx);
+
+    if (ctx == NULL)
+        return NULL;
     /*
      * In the nominal case this will be true at most once
      */
