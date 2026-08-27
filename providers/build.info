@@ -90,6 +90,17 @@ SOURCE[$BASEGOAL]=$LIBDEFAULT baseprov.c
 INCLUDE[$BASEGOAL]=implementations/include
 
 #
+# Digest provider stuff
+#
+# Like the default and base providers, the digest provider is built in, so
+# libcrypto must include its object file.  The algorithm implementations it
+# needs are already brought in through $LIBDEFAULT by $DEFAULTGOAL above.
+#
+$DIGESTGOAL=../libcrypto
+SOURCE[$DIGESTGOAL]=digestprov.c
+INCLUDE[$DIGESTGOAL]=implementations/include
+
+#
 # FIPS provider stuff
 #
 # We define it this way to ensure that configdata.pm will have all the
